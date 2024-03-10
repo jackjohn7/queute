@@ -6,7 +6,6 @@ pub struct Post {
     pub id: String,
     pub topic: String,
     pub content: String,
-    pub acknowledged: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

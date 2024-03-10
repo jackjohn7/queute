@@ -1,10 +1,11 @@
-use std::{collections::HashMap, sync::Arc, time::SystemTime};
+use std::{collections::{HashMap, HashSet}, sync::Arc, time::SystemTime};
 use message::{Message, Post, Acknowledgement};
 use tokio::{net::{TcpListener, TcpStream}, sync::{Mutex, mpsc}, io::{AsyncReadExt, BufReader, AsyncBufReadExt, AsyncWriteExt}};
 
 struct Topic {
     subscribers: Arc<Mutex<Vec<mpsc::Sender<Post>>>>,
-    data: Arc<Mutex<HashMap<String, Post>>>
+    data: Arc<Mutex<HashMap<String, Post>>>,
+    acks: Arc<Mutex<HashSet<String>>>,
 }
 
 impl Topic {
@@ -12,6 +13,7 @@ impl Topic {
         Self{
             subscribers: Arc::new(Mutex::new(Vec::new())),
             data: Arc::new(Mutex::new(HashMap::new())),
+            acks: Arc::new(Mutex::new(HashSet::new()))
         }
     }
 }
@@ -100,10 +102,11 @@ impl Server {
                     match topics.get(&topic) {
                         Some(topic) => {
                             let data = topic.data.lock().await;
+                            let mut acks = topic.acks.lock().await;
                             match data.get(&id) {
                                 Some(d) => {
                                     // mark topic as acknowledged
-                                    d.acknowledged = true;
+                                    acks.insert(d.clone().id);
                                 },
                                 None => {
                                     // invalid id
