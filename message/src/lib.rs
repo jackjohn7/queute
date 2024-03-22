@@ -31,5 +31,24 @@ pub enum Message {
     Err,
 }
 
+pub enum HandshakeInit {
+    ConnectionDetails {
+        username: String,
+        password: String
+    }
+}
+
+pub enum Handshake {
+    Init(HandshakeInit),
+    Accept
+}
+
+// To be renamed later
+pub enum NewMessage {
+    Handshake(Handshake),
+    Subscribe,
+    Publish,
+}
+
 #[cfg(test)]
 mod tests {}
