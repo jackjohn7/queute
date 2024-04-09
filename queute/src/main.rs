@@ -1,6 +1,14 @@
-use std::{collections::{HashMap, HashSet}, sync::Arc, time::SystemTime};
-use message::{Message, Post, Acknowledgement};
-use tokio::{net::{TcpListener, TcpStream}, sync::{Mutex, mpsc}, io::{AsyncReadExt, BufReader, AsyncBufReadExt, AsyncWriteExt}};
+use message::{Acknowledgement, Message, Post};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::SystemTime,
+};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
+    net::{TcpListener, TcpStream},
+    sync::{mpsc, Mutex},
+};
 
 struct Topic {
     subscribers: Arc<Mutex<Vec<mpsc::Sender<Post>>>>,
@@ -10,213 +18,83 @@ struct Topic {
 
 impl Topic {
     pub fn new() -> Self {
-        Self{
+        Self {
             subscribers: Arc::new(Mutex::new(Vec::new())),
             data: Arc::new(Mutex::new(HashMap::new())),
-            acks: Arc::new(Mutex::new(HashSet::new()))
+            acks: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 }
 /// Used to create a Queute Server
 #[derive(Default)]
 struct Server {
-    topics: Arc<Mutex<HashMap<String, Topic>>>
+    topics: Arc<Mutex<HashMap<String, Topic>>>,
 }
 
 impl Server {
     pub fn new() -> Self {
-        Server{
+        Server {
             topics: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
     pub async fn handle_connection(&self, mut stream: TcpStream) {
-
         let mut rdr = BufReader::new(&mut stream);
         let mut l = String::new();
-        rdr.read_line(&mut l).await;
+        let _ = rdr.read_line(&mut l).await;
 
         match l.trim().split(' ').collect::<Vec<_>>().as_slice() {
             ["SUB", topic] => {
-                // if user subscribes, add their subscription to the topic
-                let tx;
-                let mut rx;
-                let tx_close;
-                let mut rx_close;
+                // channel for sending subscription information
                 let topic = topic.to_string();
+                let (t_post, mut r_post);
+                // might have to switch to something key-value since unsubscribing
+                //  will invalidate this index
                 let idx_of_subscriber;
                 {
                     let topics = self.topics.lock().await;
                     match topics.get(&topic) {
                         Some(t) => {
                             // if the key is contained, set topic
-                            (tx, rx) = mpsc::channel::<Post>(10);
-                            (tx_close, rx_close) = mpsc::channel::<()>(1);
+                            (t_post, r_post) = mpsc::channel::<Post>(10);
                             // add tx to subscription pool
                             let mut subs = t.subscribers.lock().await;
                             idx_of_subscriber = subs.len();
-                            subs.push(tx);
-                        },
+                            subs.push(t_post);
+                        }
                         None => {
                             // TODO: Add Queute configurations
                             // if in strict mode, fail
                             // if in dynamic mode, create topic
-                            return
+                            return;
                         }
                     }
                 }
-
-                // handle user actions after subscription in separate thread
-                tokio::spawn(async move {
-                    loop {
-                        let mut line = String::new();
-                        if rdr.read_line(&mut line).await.unwrap() == 0 {
-                            break;
-                        }
-                    }
-                    tx_close.send(()).await;
-                });
 
                 loop {
+                    let mut i = String::new();
                     tokio::select! {
-                        Some(msg) = rx.recv() => {
-                            stream.write_all(bson::to_bson(&msg).unwrap().to_string().as_bytes()).await;
-                        }
-                        Some(_) = rx_close.recv() => {
-                            stream.write_all(b"Closed").await;
-                        }
-                    }
-                }
-            },
-            ["PUB", topic, content @ ..] => {
-                let topic = topic.to_string();
-                // convert content to single string
-
-            },
-            ["ACK", topic, id] => {
-                let topic = topic.to_string();
-                let id = id.to_string();
-                // client acknowledges posted message
-                {
-                    let topics = self.topics.lock().await;
-                    match topics.get(&topic) {
-                        Some(topic) => {
-                            let data = topic.data.lock().await;
-                            let mut acks = topic.acks.lock().await;
-                            match data.get(&id) {
-                                Some(d) => {
-                                    // mark topic as acknowledged
-                                    acks.insert(d.clone().id);
-                                },
-                                None => {
-                                    // invalid id
-                                    stream.write_all(b"Invalid message specified").await;
-                                }
-                            }
+                        _ = rdr.read_line(&mut i) => {
+                            // you now have read into i
                         },
-                        None => {
-
+                        val = r_post.recv() => {
+                            // you can now write to stream with new post
+                            match val {
+                                Some(post) => {
+                                    //stream.write_all(bson::to_bson(&post).unwrap().to_string().as_bytes()).await;
+                                    // I don't think this will work tbh
+                                    let _ = rdr.write_all(bson::to_bson(&post).unwrap().to_string().as_bytes());
+                                },
+                                None => break
+                            }
                         }
                     }
                 }
-            },
+            }
             _ => {
-                stream.write_all(b"Invalid connection specified").await;
+                // invalid message
             }
         }
-
-        //let mut buf = [0; 1024];
-        //let topic_msg;
-
-        //// detect subscription or publish
-
-        //// Read the topic selection from the client
-        //match stream.read(&mut buf).await {
-        //    Ok(n) => {
-        //        let msg = String::from_utf8_lossy(&buf[..n]).into_owned();
-        //        println!("Received topic selection: {}", msg);
-        //        topic_msg = msg;
-        //    }
-        //    Err(_) => {
-        //        // TODO: write error message to stream
-        //        return;
-        //    }
-        //}
-
-        //let tx;
-        //let rx;
-
-        //// check for topic in server. If in strict topic mode, fail when
-        ////  topic is not found
-        //{
-        //    let topics = self.topics.lock().await;
-        //    match topics.get(&topic_msg) {
-        //        Some(t) => {
-        //            // if the key is contained, set topic
-        //            (tx, rx) = mpsc::channel::<Message>(10);
-        //            // add tx to subscription pool
-        //        },
-        //        None => {
-        //            // TODO: Add Queute configurations
-        //            // if in strict mode, fail
-        //            // if in dynamic mode, create topic
-        //            return
-        //        }
-        //    }
-        //}
-
-        //let (tx, _) = mpsc::channel::<Message>(10);
-        //let idx_of_subscriber;
-
-        //// add subscriber in scope to free mutex afterward
-        //{
-        //    let mut subscribers = self.subscribers.lock().await;
-        //    idx_of_subscriber = subscribers.len();
-        //    subscribers.push(tx.clone());
-        //}
-        //let mut expectingAck = false;
-
-        //let mut buf = [0; 1024];
-        //loop {
-        //    match stream.read(&mut buf).await {
-        //        Ok(0) => break, // connection closed and thread will be cleaned up
-        //        Ok(n) => {
-        //            // handle message
-        //            let msg = String::from_utf8_lossy(&buf[..n]).into_owned();
-        //            println!("received message: {}", msg);
-
-        //            // parse message into enum Message
-        //            let message: Message = bson::from_bson(msg.into()).unwrap();
-
-        //            // if post, broadcast Post to all subscribers
-        //            match message {
-        //                Message::Ack(ack) => {
-        //                    if expectingAck {
-        //                        continue;
-        //                    } else {
-        //                        // create error
-
-        //                        // send back Message:Err serialized to BSON
-        //                        todo!();
-        //                    }
-        //                },
-        //                Message::Post(post) => {
-
-        //                },
-        //            }
-        //        },
-        //        Err(_) => {
-        //            // error occured in connection
-        //            break
-        //        }
-        //    }
-        //}
-
-        // remove subscriber in scope like before
-        //{
-        //    let mut subscribers = self.subscribers.lock().await;
-        //    subscribers.remove(idx_of_subscriber);
-        //}
     }
 
     async fn broadcast(&self, topic: &Topic, post: Post) {
