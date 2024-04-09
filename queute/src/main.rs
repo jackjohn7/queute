@@ -50,8 +50,13 @@ impl Server {
         let msg;
         match String::from_utf8(buf) {
             Ok(msg_content) => msg = msg_content,
-            Err(_) => return, // handle bad message later
+            Err(_) => {
+                let _ = stream.write_all("Connection failed".as_bytes()).await;
+                return;
+            }
         }
+
+        // TODO: parse initial message and expect credentials
 
         match msg.trim().split(' ').collect::<Vec<_>>().as_slice() {
             ["SUB", topic] => {
@@ -60,7 +65,7 @@ impl Server {
                 let (t_post, mut r_post);
                 // might have to switch to something key-value since unsubscribing
                 //  will invalidate this index
-                let idx_of_subscriber;
+                let _idx_of_subscriber;
                 {
                     let topics = self.topics.lock().await;
                     match topics.get(&topic) {
@@ -69,7 +74,7 @@ impl Server {
                             (t_post, r_post) = mpsc::channel::<Post>(10);
                             // add tx to subscription pool
                             let mut subs = t.subscribers.lock().await;
-                            idx_of_subscriber = subs.len();
+                            _idx_of_subscriber = subs.len();
                             subs.push(t_post);
                         }
                         None => {
@@ -92,8 +97,6 @@ impl Server {
                             // you can now write to stream with new post
                             match val {
                                 Some(post) => {
-                                    //stream.write_all(bson::to_bson(&post).unwrap().to_string().as_bytes()).await;
-                                    // I don't think this will work tbh
                                     let _ = stream.write_all(bson::to_bson(&post).unwrap().to_string().as_bytes());
                                 },
                                 None => break
@@ -104,11 +107,13 @@ impl Server {
             }
             _ => {
                 // invalid message
+                let _ = stream.write_all("Connection failed".as_bytes()).await;
+                return;
             }
         }
     }
 
-    async fn broadcast(&self, topic: &Topic, post: Post) {
+    async fn _broadcast(&self, topic: &Topic, post: Post) {
         let subscribers = topic.subscribers.lock().await;
         for subscriber in subscribers.iter() {
             // cloning here could be bad. Should look into using Arc
