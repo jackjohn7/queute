@@ -1,10 +1,6 @@
 use message::{Acknowledgement, Message, Post};
 use std::{
-    collections::{HashMap, HashSet},
-    io::Read,
-    net::SocketAddr,
-    sync::Arc,
-    time::SystemTime,
+    collections::{HashMap, HashSet}, io::Read, net::SocketAddr, sync::Arc, time::SystemTime
 };
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
@@ -44,16 +40,13 @@ impl Server {
         //let mut rdr = BufReader::new(&mut stream);
         //let mut l = String::new();
         let mut buf = vec![0; 1024];
-        let _ = stream.read(&mut buf);
+        let x = stream.read(&mut buf);
+        x.1;
+        match x {
+            Read
         //let _ = rdr.read_line(&mut l).await;
-        // stringify the bytes
-        let msg;
-        match String::from_utf8(buf) {
-            Ok(msg_content) => msg = msg_content,
-            Err(_) => return, // handle bad message later
-        }
 
-        match msg.trim().split(' ').collect::<Vec<_>>().as_slice() {
+        match l.trim().split(' ').collect::<Vec<_>>().as_slice() {
             ["SUB", topic] => {
                 // channel for sending subscription information
                 let topic = topic.to_string();
@@ -80,12 +73,11 @@ impl Server {
                         }
                     }
                 }
-                // clear buf
-                buf = vec![0; 1024];
 
                 loop {
+                    let mut i = String::new();
                     tokio::select! {
-                        _ = stream.read(&mut buf) => {
+                        _ = rdr.read_line(&mut i) => {
                             // you now have read into i
                         },
                         val = r_post.recv() => {
@@ -94,7 +86,7 @@ impl Server {
                                 Some(post) => {
                                     //stream.write_all(bson::to_bson(&post).unwrap().to_string().as_bytes()).await;
                                     // I don't think this will work tbh
-                                    let _ = stream.write_all(bson::to_bson(&post).unwrap().to_string().as_bytes());
+                                    let _ = rdr.write_all(bson::to_bson(&post).unwrap().to_string().as_bytes());
                                 },
                                 None => break
                             }
